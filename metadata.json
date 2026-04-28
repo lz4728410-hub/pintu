@@ -1,0 +1,8 @@
+{
+  "name": "Hand Gesture Puzzle",
+  "description": "Control puzzle pieces using hand gestures (pinch to grab, fist to switch).",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}
