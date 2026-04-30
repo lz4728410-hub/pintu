@@ -1,6 +1,8 @@
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
-import { Camera, CheckCircle2, Hand, XCircle } from "lucide-react";
+import { Camera, CheckCircle2, Hand, XCircle, Cpu, ShieldCheck, Zap } from "lucide-react";
 import React, { useEffect, useRef, useState, useMemo } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import ParticleTransition from "./ParticleTransition";
 
 // --- Types & Constants ---
 type Point = { x: number; y: number };
@@ -19,8 +21,43 @@ type Piece = {
 };
 
 const PINCH_THRESHOLD_PX = 40; // Distance between thumb and index to trigger pinch
-const GRAB_RADIUS_PX = 60; // How close hand needs to be to grab a piece
+const GRAB_RADIUS_PX = 150; // How close hand needs to be to grab a piece
 const FIST_COOLDOWN_MS = 1000; // Cooldown after a fist gesture triggers an action
+
+const TaotieIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 200 120" fill="currentColor" className={className} xmlns="http://www.w3.org/2000/svg">
+    <path d="M100 23 L110 38 L100 48 L90 38 Z" />
+    
+    <path d="M25 20 V 43 C40 43 50 33 60 33 L70 33 C75 33 80 38 85 43 C75 43 70 38 65 38 H55 C45 38 35 48 20 46 V 20 Z" />
+    <path transform="scale(-1,1) translate(-200,0)" d="M25 20 V 43 C40 43 50 33 60 33 L70 33 C75 33 80 38 85 43 C75 43 70 38 65 38 H55 C45 38 35 48 20 46 V 20 Z" />
+
+    <path d="M50 23 H 70 C75 23 80 28 85 33 C80 33 75 28 70 28 H 50 V 23 Z" />
+    <path transform="scale(-1,1) translate(-200,0)" d="M50 23 H 70 C75 23 80 28 85 33 C80 33 75 28 70 28 H 50 V 23 Z" />
+
+    <path d="M50 48 V 63 C50 68 60 68 70 68 C80 68 85 63 85 63 V 48 H 50 Z M 60 53 H 75 V 58 H 60 V 53 Z" />
+    <path transform="scale(-1,1) translate(-200,0)" d="M50 48 V 63 C50 68 60 68 70 68 C80 68 85 63 85 63 V 48 H 50 Z M 60 53 H 75 V 58 H 60 V 53 Z" />
+
+    <path d="M95 53 C90 53 90 58 95 58 C100 58 100 63 95 63 C90 63 90 68 95 68" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/>
+    <path d="M105 53 C110 53 110 58 105 58 C100 58 100 63 105 63 C110 63 110 68 105 68" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/>
+    
+    <path d="M95 68 C90 68 90 73 95 73" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/>
+    <path d="M105 68 C110 68 110 73 105 73" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/>
+
+    <path d="M15 46 C25 46 25 56 35 56 V 73 H 25 V 63 C 15 63 15 53 15 46 Z" />
+    <path transform="scale(-1,1) translate(-200,0)" d="M15 46 C25 46 25 56 35 56 V 73 H 25 V 63 C 15 63 15 53 15 46 Z" />
+
+    <path d="M75 73 C 65 73 60 83 70 93 C 75 98 85 98 85 93 C 85 88 80 88 80 93 C 75 96 65 96 62 88 C 60 78 70 78 75 78 Z" />
+    <path transform="scale(-1,1) translate(-200,0)" d="M75 73 C 65 73 60 83 70 93 C 75 98 85 98 85 93 C 85 88 80 88 80 93 C 75 96 65 96 62 88 C 60 78 70 78 75 78 Z" />
+
+    <path d="M85 93 C 95 103 105 103 115 93 C 110 88 105 88 105 93 C 100 98 95 93 95 93 C 95 88 90 88 85 93 Z" />
+
+    <path d="M60 88 C 50 98 40 88 35 88 C 40 98 50 108 60 108 C 70 108 75 98 75 98 C 70 103 65 103 60 88 Z" />
+    <path transform="scale(-1,1) translate(-200,0)" d="M60 88 C 50 98 40 88 35 88 C 40 98 50 108 60 108 C 70 108 75 98 75 98 C 70 103 65 103 60 88 Z" />
+
+    <path d="M35 73 C 45 73 55 83 55 93 C 55 103 45 103 45 93 C 45 88 50 88 50 93 C 50 98 40 98 40 93 C 40 83 30 83 25 83 C 30 83 35 78 35 73 Z" />
+    <path transform="scale(-1,1) translate(-200,0)" d="M35 73 C 45 73 55 83 55 93 C 55 103 45 103 45 93 C 45 88 50 88 50 93 C 50 98 40 98 40 93 C 40 83 30 83 25 83 C 30 83 35 78 35 73 Z" />
+  </svg>
+)
 
 const createImageSet = (url: string, size: number): Omit<Piece, 'x' | 'y'>[] => {
   const pieces: Omit<Piece, 'x' | 'y'>[] = [];
@@ -62,6 +99,8 @@ export default function App() {
   const [modelLoadingState, setModelLoadingState] = useState<"loading" | "ready" | "error">("loading");
   
   const [currentGesture, setCurrentGesture] = useState<"IDLE" | "PINCHING" | "FIST">("IDLE");
+  const [transitionState, setTransitionState] = useState<"IDLE" | "FIST_HOLD" | "TRANSITIONING">("IDLE");
+  const transitionStateRef = useRef<"IDLE" | "FIST_HOLD" | "TRANSITIONING">("IDLE");
   
   // App Logic State
   const activePuzzleSets = useMemo(() => [
@@ -252,16 +291,17 @@ export default function App() {
 
     // Detect State Changes
     const prevState = gestureStateRef.current;
+    const prevTransition = transitionStateRef.current;
     
     if (newGesture === "FIST" && prevState !== "FIST") {
        // Transitioned to Fist
-       if (timeMs - lastFistTimeRef.current > FIST_COOLDOWN_MS) {
-         lastFistTimeRef.current = timeMs;
-         handleFistTrigger();
+       if (prevTransition === "IDLE") {
+         updateTransitionState("FIST_HOLD");
+         if (draggedPieceIdRef.current) dropPiece();
        }
     }
     
-    if (newGesture === "PINCHING") {
+    if (newGesture === "PINCHING" && prevTransition === "IDLE") {
       // While pinching
       if (prevState !== "PINCHING") {
         // Newly pinched
@@ -288,6 +328,13 @@ export default function App() {
     }
   };
 
+  const updateTransitionState = (s: "IDLE" | "FIST_HOLD" | "TRANSITIONING") => {
+    if (transitionStateRef.current !== s) {
+      transitionStateRef.current = s;
+      setTransitionState(s);
+    }
+  };
+
   const attemptGrabPiece = (cursor: Point) => {
     let closestPieceId: string | null = null;
     let minDistance = GRAB_RADIUS_PX;
@@ -304,7 +351,14 @@ export default function App() {
 
     if (closestPieceId) {
       draggedPieceIdRef.current = closestPieceId;
-      // Bring to front logic could go here by reordering array
+      // Bring to front
+      const pieceIdx = piecesRef.current.findIndex(p => p.id === closestPieceId);
+      if (pieceIdx > -1) {
+        const piece = piecesRef.current[pieceIdx];
+        piecesRef.current.splice(pieceIdx, 1);
+        piecesRef.current.push(piece);
+        setPieces([...piecesRef.current]);
+      }
     }
   };
 
@@ -324,26 +378,40 @@ export default function App() {
   const dropPiece = () => {
     const id = draggedPieceIdRef.current;
     draggedPieceIdRef.current = null;
-    
     if (!id) return;
     
-    // Snap to grid logic
+    // Snap to grid logic (centered on page)
     const piece = piecesRef.current.find(p => p.id === id);
-    const gridEl = document.getElementById('puzzle-board-grid');
     
-    if (piece && piece.targetCol !== undefined && piece.targetRow !== undefined && gridEl) {
-      const gridRect = gridEl.getBoundingClientRect();
-      const PIECE_SIZE = 128; // 32 Tailwind units
+    if (piece) {
+      const CELL_SIZE = 128;
+      const GRID_SIZE = CELL_SIZE * 3; // 384
       
-      const targetX = gridRect.left + piece.targetCol * PIECE_SIZE + PIECE_SIZE / 2;
-      const targetY = gridRect.top + piece.targetRow * PIECE_SIZE + PIECE_SIZE / 2;
+      const gridLeft = window.innerWidth / 2 - GRID_SIZE / 2;
+      const gridTop = window.innerHeight / 2 - GRID_SIZE / 2;
       
-      const snapDistance = 80; // Distance tolerance for snapping
-      const dist = Math.sqrt((piece.x - targetX) ** 2 + (piece.y - targetY) ** 2);
+      const relativeX = piece.x - gridLeft;
+      const relativeY = piece.y - gridTop;
       
-      if (dist < snapDistance) {
+      // Calculate nearest col and row
+      let nearestCol = Math.floor(relativeX / CELL_SIZE);
+      let nearestRow = Math.floor(relativeY / CELL_SIZE);
+      
+      // Check if dropped reasonably near the 9-grid (allow a larger drop area to be forgiving)
+      const inGridBounds = 
+        nearestCol >= -1 && nearestCol <= 3 && 
+        nearestRow >= -1 && nearestRow <= 3;
+
+      if (inGridBounds) {
+        // Clamp to 0-2 for actual slot snapping (9 grid locked positions)
+        nearestCol = Math.max(0, Math.min(2, nearestCol));
+        nearestRow = Math.max(0, Math.min(2, nearestRow));
+
+        const snapX = gridLeft + nearestCol * CELL_SIZE + CELL_SIZE / 2;
+        const snapY = gridTop + nearestRow * CELL_SIZE + CELL_SIZE / 2;
+        
         piecesRef.current = piecesRef.current.map(p => 
-          p.id === id ? { ...p, x: targetX, y: targetY } : p
+          p.id === id ? { ...p, x: snapX, y: snapY } : p
         );
         setPieces([...piecesRef.current]);
       }
@@ -387,35 +455,153 @@ export default function App() {
   // --- UI Screens ---
   if (hasPermission === null) {
     return (
-      <div className="flex w-full h-screen items-center justify-center bg-black text-slate-100 font-sans relative overflow-hidden">
-        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:16px_16px]"></div>
-        
-        <div className="max-w-md p-8 bg-slate-900 border border-slate-800 shadow-2xl rounded-2xl relative z-10">
-           <div className="bg-sky-500/20 p-4 rounded-full w-fit mx-auto mb-6 border border-sky-500/30">
-              <Camera className="w-10 h-10 text-sky-400" />
-           </div>
-           <h1 className="text-2xl font-bold tracking-tight text-center mb-4">手势<span className="text-sky-400">互动拼图</span> v2.0</h1>
-           <p className="text-slate-400 mb-8 text-center text-sm leading-relaxed">
-             此应用使用您的设备摄像头来追踪手势，并且不会发送任何视频数据。
-           </p>
-           <div className="bg-slate-950/50 p-4 rounded-xl text-left border border-slate-800 mb-8 space-y-3 shadow-inner">
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-2">手势指南</h3>
-              <div className="flex items-center gap-3">
-                <span className="text-lg">🤌</span> 
-                <p className="text-sm"><span className="font-bold text-sky-400">捏合:</span> 抓取并移动</p>
+      <div className="flex w-full h-screen items-center justify-center bg-black text-slate-100 font-sans relative overflow-hidden select-none">
+        {/* Animated Cyber Background */}
+        <div className="absolute inset-0 z-0">
+          <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:24px_24px]"></div>
+          <motion.div 
+            initial={{ y: "-100%" }}
+            animate={{ y: "100%" }}
+            transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+            className="absolute inset-x-0 h-px bg-gradient-to-r from-transparent via-sky-500/50 to-transparent shadow-[0_0_15px_rgba(56,189,248,0.5)] z-10"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black pointer-events-none"></div>
+        </div>
+
+        {/* Floating Particles or Shapes */}
+        {[...Array(6)].map((_, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ 
+              opacity: [0.1, 0.3, 0.1], 
+              scale: [1, 1.2, 1],
+              x: [0, (i % 2 === 0 ? 50 : -50), 0],
+              y: [0, (i < 3 ? 30 : -30), 0]
+            }}
+            transition={{ duration: 5 + i, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute w-64 h-64 border border-sky-500/10 rounded-full"
+            style={{ 
+              left: `${15 + i * 12}%`, 
+              top: `${20 + (i % 3) * 20}%`,
+              filter: 'blur(40px)'
+            }}
+          />
+        ))}
+
+        <div className="relative z-10 w-full max-w-2xl px-6 flex flex-col items-center">
+          {/* Logo/Icon Container */}
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            className="mb-12 flex justify-center w-full"
+          >
+            <TaotieIcon className="w-32 h-auto text-[#8305ff] drop-shadow-[0_0_15px_rgba(131,5,255,0.4)]" />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4, duration: 1 }}
+            className="text-center space-y-6"
+          >
+            <div className="flex flex-col items-center">
+              <motion.h1 
+                className="text-7xl font-bold tracking-[0.15em] text-[#8305ff] leading-tight mb-2"
+                style={{ fontFamily: 'Arial, sans-serif' }}
+              >
+                纹镜 幻象
+              </motion.h1>
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: "100%" }}
+                transition={{ delay: 0.8, duration: 1, ease: "easeInOut" }}
+                className="h-px bg-gradient-to-r from-transparent via-[#8305ff] to-transparent mb-4"
+              />
+              <span className="text-sm text-[#8305ff] tracking-[0.4em] uppercase font-mono opacity-80">
+                Bronze Pattern Visual Reimagining
+              </span>
+            </div>
+
+            <p className="text-[#8305ff] max-w-sm mx-auto text-sm leading-relaxed font-light mb-12">
+               穿越时空的数字窥镜。利用先进的 AI 视觉技术，探索古代青铜纹样的几何奥秘与动态之美。
+            </p>
+
+            <div className="grid grid-cols-3 gap-4 mb-12 w-full max-w-md mx-auto">
+               {[
+                 { icon: <Cpu className="w-4 h-4" />, label: "手势交互" },
+                 { icon: <Zap className="w-4 h-4" />, label: "实时追踪" },
+                 { icon: <ShieldCheck className="w-4 h-4" />, label: "隐私安全" }
+               ].map((item, i) => (
+                 <motion.div 
+                   key={i}
+                   initial={{ opacity: 0, y: 10 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   transition={{ delay: 1.2 + i * 0.1 }}
+                   className="flex flex-col items-center gap-2 p-3 rounded-xl bg-slate-900/50 border border-white/5 backdrop-blur-sm"
+                 >
+                   <div className="text-[#8305ff]">{item.icon}</div>
+                   <span className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">{item.label}</span>
+                 </motion.div>
+               ))}
+            </div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1.5, duration: 0.8 }}
+            >
+              <button 
+                onClick={requestCamera} 
+                disabled={isLoadingCamera}
+                className="group relative px-12 py-5 overflow-hidden rounded-full bg-transparent border border-[#8305ff]/40 text-white font-bold tracking-widest transition-all hover:border-[#8305ff] disabled:opacity-50"
+              >
+                {/* Button Shine/Scan effect */}
+                <motion.div 
+                  initial={{ x: "-100%" }}
+                  whileHover={{ x: "100%" }}
+                  transition={{ duration: 0.6, ease: "easeInOut" }}
+                  className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-12"
+                />
+                <div className="absolute inset-0 bg-[#8305ff]/10 group-hover:bg-[#8305ff]/20 transition-colors"></div>
+                
+                <span className="relative z-10 flex items-center gap-3">
+                  {isLoadingCamera ? (
+                    <motion.div 
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      className="w-4 h-4 border-2 border-[#8305ff] border-t-transparent rounded-full"
+                    />
+                  ) : <Zap className="w-4 h-4 text-[#8305ff] fill-[#8305ff]" />}
+                  {isLoadingCamera ? "INITIALIZING SYSTEM..." : "ACCESS INTERFACE"}
+                </span>
+                
+                {/* Corner Accents */}
+                <span className="absolute top-0 left-4 w-2 h-0.5 bg-[#8305ff] group-hover:w-8 transition-all"></span>
+                <span className="absolute bottom-0 right-4 w-2 h-0.5 bg-[#8305ff] group-hover:w-8 transition-all"></span>
+              </button>
+              
+              <div className="mt-4 text-[10px] font-mono text-slate-600 uppercase tracking-tighter">
+                Secure encryption enabled // Camera access required for AI tracking
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-lg">✊</span> 
-                <p className="text-sm"><span className="font-bold text-slate-300">握拳:</span> 切换拼图</p>
-              </div>
-           </div>
-           <button 
-             onClick={requestCamera} 
-             disabled={isLoadingCamera}
-             className="w-full py-4 px-6 bg-sky-500 text-white rounded-lg font-bold tracking-wide shadow-[0_0_20px_rgba(56,189,248,0.3)] hover:bg-sky-400 hover:shadow-[0_0_25px_rgba(56,189,248,0.5)] transition-all text-sm disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
-           >
-              {isLoadingCamera ? "正在初始化摄像头..." : "开启摄像头以开始"}
-           </button>
+            </motion.div>
+          </motion.div>
+        </div>
+
+        {/* Footer info in cover */}
+        <div className="absolute bottom-10 inset-x-10 flex justify-between items-end opacity-30">
+          <div className="space-y-1">
+             <div className="text-[10px] font-mono tracking-widest uppercase">Process ID: BRONZE_MIRROR_RECON</div>
+             <div className="text-[10px] font-mono tracking-widest uppercase">Build: v2.4.0.ALPHA</div>
+          </div>
+          <div className="w-32 h-1 bg-slate-900 rounded-full overflow-hidden">
+             <motion.div 
+               animate={{ x: ["-100%", "100%"] }}
+               transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+               className="w-1/2 h-full bg-sky-500"
+             />
+          </div>
         </div>
       </div>
     );
@@ -442,7 +628,7 @@ export default function App() {
         playsInline
         autoPlay
         muted
-        className="absolute inset-0 w-[1280px] h-full object-cover opacity-10 -scale-x-100 mix-blend-screen z-0 bg-black text-black border border-black"
+        className="absolute inset-0 w-full h-full object-cover opacity-10 -scale-x-100 mix-blend-screen z-0 bg-black pointer-events-none"
       ></video>
 
       {/* Canvas for Hand Overlay (Drawing) */}
@@ -451,15 +637,15 @@ export default function App() {
         className="absolute inset-0 w-full h-full pointer-events-none z-10"
       ></canvas>
 
-      <header className="h-24 border-b border-slate-800 flex items-center justify-between px-8 !bg-black backdrop-blur-md shrink-0 z-20 relative">
+      <header className="h-24 border-none flex items-center justify-between px-8 !bg-black backdrop-blur-md shrink-0 z-20 relative">
         <div className="flex items-center gap-4">
           <div className="flex flex-col gap-0.5">
-            <h1 className="tracking-[0.1em] text-[#FFFF00] drop-shadow-md font-bold text-left" style={{ fontFamily: 'Arial', fontStyle: 'normal', textDecorationLine: 'none', fontSize: '55px', lineHeight: '59px', borderStyle: 'none', height: '49px' }}>
+            <h1 className="tracking-[0.1em] text-[#8305ff] bg-black drop-shadow-md font-bold text-left" style={{ fontFamily: 'Arial', fontStyle: 'normal', textDecorationLine: 'none', fontSize: '55px', lineHeight: '59px', borderStyle: 'none', height: '49px' }}>
               纹镜 幻象
             </h1>
             <div className="flex flex-col justify-center border-t border-slate-700 mt-1 pt-1">
-               <span className="text-[12px] text-[#FFFF00] tracking-[0.2em] text-left font-medium">青铜纹样视觉重构与动态设计</span>
-               <span className="text-[9px] text-[#FFFF00] tracking-widest uppercase text-center mt-0.5 opacity-90">Bronze Pattern Visual Reconstruction And Dynamic Design</span>
+               <span className="text-[12px] text-[#9931ff] tracking-[0.2em] text-left font-medium">青铜纹样视觉重构与动态设计</span>
+               <span className="text-[9px] text-[#9839ff] tracking-widest uppercase text-center mt-0.5 opacity-90">Bronze Pattern Visual Reconstruction And Dynamic Design</span>
             </div>
           </div>
         </div>
@@ -472,8 +658,8 @@ export default function App() {
               </>
             ) : (
               <>
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
-                <span className="text-xs font-mono text-emerald-400 uppercase tracking-widest">摄像头已启动</span>
+                <div className="w-2 h-2 rounded-full bg-[#ffe400] animate-pulse shadow-[0_0_8px_rgba(255,228,0,0.8)]"></div>
+                <span className="text-[17px] leading-[24px] font-mono text-[#9429ff] uppercase tracking-widest">摄像头已启动</span>
               </>
             )}
           </div>
@@ -483,7 +669,7 @@ export default function App() {
       <main className="flex-1 flex gap-6 p-6 z-20 pointer-events-none relative">
         {/* Side Control Panel */}
         <aside className="w-80 flex flex-col gap-6 pointer-events-auto h-full">
-          <div className="!bg-black backdrop-blur-md border border-slate-800 rounded-xl p-5 overflow-y-auto shadow-2xl flex flex-col gap-6 w-[200px] h-[600px]">
+          <div className="!bg-black backdrop-blur-md border border-slate-800 rounded-xl p-5 overflow-y-auto shadow-2xl flex flex-col gap-6 w-[200px] h-[690px]">
             <div>
               <h2 className="text-xs font-semibold text-slate-400 uppercase mb-4 tracking-widest">交互状态 & 手势说明</h2>
               
@@ -548,48 +734,58 @@ export default function App() {
            <div className="absolute inset-0 flex items-center justify-center opacity-30">
               <div className="w-[800px] h-[600px] bg-[radial-gradient(#334155_2px,transparent_2px)] [background-size:40px_40px] mask-image-[radial-gradient(ellipse_at_center,black_40%,transparent_70%)]"></div>
            </div>
-           
-           {/* 3x3 Snap Target Grid */}
-           <div id="puzzle-board-grid" className="relative w-[384px] h-[384px] grid grid-cols-3 grid-rows-3 border-2 border-slate-700/60 rounded-xl overflow-hidden shadow-2xl bg-slate-900/40 backdrop-blur-sm z-10 box-content">
-             {[0,1,2,3,4,5,6,7,8].map(i => (
-               <div key={i} className="border border-slate-700/40 transition-colors"></div>
-             ))}
-           </div>
         </section>
       </main>
 
       {/* Draggable Puzzle Pieces */}
-      {pieces.map((piece) => (
-        <div
-          key={piece.id}
-          className={`absolute flex items-center justify-center w-32 h-32 text-6xl rounded-none border bg-slate-900/80 backdrop-blur-md shadow-xl transition-all z-30 pointer-events-auto select-none overflow-hidden
-            ${draggedPieceIdRef.current === piece.id ? 'scale-110 shadow-[0_0_30px_rgba(56,189,248,0.3)] ring-4 ring-sky-500/30 z-40' : 'scale-100 hover:scale-105 duration-300'}
-            ${piece.color}
-          `}
-          style={{
-            left: piece.x,
-            top: piece.y,
-            transform: `translate(-50%, -50%) ${draggedPieceIdRef.current === piece.id ? 'rotate-3deg' : ''}`,
-            transitionProperty: draggedPieceIdRef.current === piece.id ? 'box-shadow' : 'all',
-          }}
-        >
-          {piece.type === 'image' && piece.imageUrl ? (
-            <div 
-               className="w-full h-full pointer-events-none"
-               style={{
-                 backgroundImage: `url(${piece.imageUrl})`,
-                 backgroundSize: `${piece.gridSize ? piece.gridSize * 100 : 300}%`,
-                 backgroundPosition: piece.bgPos,
-               }}
-            />
-          ) : (
-            piece.emoji
-          )}
-          {draggedPieceIdRef.current === piece.id && (
-             <div className="absolute -top-3 -right-3 px-2 py-1 bg-sky-500 rounded text-white text-[10px] font-bold tracking-wider shadow-md border border-sky-400 z-50">已抓取</div>
-          )}
-        </div>
-      ))}
+      <AnimatePresence>
+        {transitionState === 'IDLE' && pieces.map((piece) => (
+          <motion.div
+            key={piece.id}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.2, filter: 'blur(10px)' }}
+            transition={{ duration: 0.5 }}
+            className={`absolute flex items-center justify-center w-32 h-32 text-6xl rounded-none border bg-slate-900/80 backdrop-blur-md shadow-xl transition-colors z-30 pointer-events-auto select-none overflow-hidden
+              ${draggedPieceIdRef.current === piece.id ? 'shadow-[0_0_30px_rgba(56,189,248,0.3)] ring-4 ring-sky-500/30 z-40' : 'hover:scale-105 duration-300'}
+              ${piece.color}
+            `}
+            style={{
+              left: piece.x,
+              top: piece.y,
+              transform: `translate(-50%, -50%) ${draggedPieceIdRef.current === piece.id ? 'rotate-3deg scale(1.1)' : ''}`,
+            }}
+          >
+            {piece.type === 'image' && piece.imageUrl ? (
+              <div 
+                 className="w-full h-full pointer-events-none"
+                 style={{
+                   backgroundImage: `url(${piece.imageUrl})`,
+                   backgroundSize: `${piece.gridSize ? piece.gridSize * 100 : 300}%`,
+                   backgroundPosition: piece.bgPos,
+                 }}
+              />
+            ) : (
+              piece.emoji
+            )}
+            {draggedPieceIdRef.current === piece.id && (
+               <div className="absolute -top-3 -right-3 px-2 py-1 bg-sky-500 rounded text-white text-[10px] font-bold tracking-wider shadow-md border border-sky-400 z-50">已抓取</div>
+            )}
+          </motion.div>
+        ))}
+      </AnimatePresence>
+
+      {/* Particle Effect Overlay */}
+      {transitionState === 'FIST_HOLD' && (
+         <ParticleTransition 
+            imageUrl={activePuzzleSets[Math.min(currentSetIndex, activePuzzleSets.length - 1)][0]?.imageUrl || DEFAULT_IMAGES[0]}
+            active={currentGesture === "FIST"}
+            onComplete={() => {
+              handleFistTrigger();
+              updateTransitionState("IDLE");
+            }}
+         />
+      )}
 
       {/* Center Reticle UI guide when empty */}
       {pieces.length === 0 && modelLoadingState === "ready" && (
@@ -606,7 +802,7 @@ export default function App() {
           <span>模型: 手部关键点检测 v1</span>
         </div>
         <div className="flex gap-4">
-          <span className="text-sky-500">● 追踪中</span>
+          <span className="text-[12px] leading-[19px] text-[#ffdf05]">● 追踪中</span>
         </div>
       </footer>
     </div>
